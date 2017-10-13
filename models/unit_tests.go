@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-xorm/core"
 	"github.com/go-xorm/xorm"
-	_ "github.com/mattn/go-sqlite3" // for the test engine
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/testfixtures.v2"
 )
@@ -17,8 +16,9 @@ import (
 // NonexistentID an ID that will never exist
 const NonexistentID = 9223372036854775807
 
-// CreateTestEngine create an xorm engine for testing
-func CreateTestEngine() error {
+// CreateTestEngine create in-memory sqlite database for unit tests
+// Any package that calls this must import github.com/mattn/go-sqlite3
+func CreateTestEngine(fixturesDir string) error {
 	var err error
 	x, err = xorm.NewEngine("sqlite3", "file::memory:?cache=shared")
 	if err != nil {
@@ -29,7 +29,7 @@ func CreateTestEngine() error {
 		return err
 	}
 
-	return InitFixtures(&testfixtures.SQLite{}, "fixtures/")
+	return InitFixtures(&testfixtures.SQLite{}, fixturesDir)
 }
 
 // PrepareTestDatabase load test fixtures into test database
@@ -109,4 +109,10 @@ func AssertSuccessfulInsert(t *testing.T, beans ...interface{}) {
 // AssertCount assert the count of a bean
 func AssertCount(t *testing.T, bean interface{}, expected interface{}) {
 	assert.EqualValues(t, expected, GetCount(t, bean))
+}
+
+// AssertInt64InRange assert value is in range [low, high]
+func AssertInt64InRange(t *testing.T, low, high, value int64) {
+	assert.True(t, value >= low && value <= high,
+		"Expected value in range [%d, %d], found %d", low, high, value)
 }

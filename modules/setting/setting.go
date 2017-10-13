@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/mail"
 	"net/url"
 	"os"
@@ -99,6 +100,7 @@ var (
 		AuthorizedKeysBackup bool           `ini:"SSH_AUTHORIZED_KEYS_BACKUP"`
 		MinimumKeySizeCheck  bool           `ini:"-"`
 		MinimumKeySizes      map[string]int `ini:"-"`
+		ExposeAnonymous      bool           `ini:"SSH_EXPOSE_ANONYMOUS"`
 	}{
 		Disabled:           false,
 		StartBuiltinServer: false,
@@ -598,6 +600,8 @@ func NewContext() {
 
 	if len(CustomConf) == 0 {
 		CustomConf = CustomPath + "/conf/app.ini"
+	} else if !filepath.IsAbs(CustomConf) {
+		CustomConf = filepath.Join(workDir, CustomConf)
 	}
 
 	if com.IsFile(CustomConf) {
@@ -657,8 +661,29 @@ func NewContext() {
 	// This value is empty if site does not have sub-url.
 	AppSubURL = strings.TrimSuffix(url.Path, "/")
 	AppSubURLDepth = strings.Count(AppSubURL, "/")
+	// Check if Domain differs from AppURL domain than update it to AppURL's domain
+	// TODO: Can be replaced with url.Hostname() when minimal GoLang version is 1.8
+	urlHostname := strings.SplitN(url.Host, ":", 2)[0]
+	if urlHostname != Domain && net.ParseIP(urlHostname) == nil {
+		Domain = urlHostname
+	}
 
-	LocalURL = sec.Key("LOCAL_ROOT_URL").MustString(string(Protocol) + "://localhost:" + HTTPPort + "/")
+	var defaultLocalURL string
+	switch Protocol {
+	case UnixSocket:
+		defaultLocalURL = "http://unix/"
+	case FCGI:
+		defaultLocalURL = AppURL
+	default:
+		defaultLocalURL = string(Protocol) + "://"
+		if HTTPAddr == "0.0.0.0" {
+			defaultLocalURL += "localhost"
+		} else {
+			defaultLocalURL += HTTPAddr
+		}
+		defaultLocalURL += ":" + HTTPPort + "/"
+	}
+	LocalURL = sec.Key("LOCAL_ROOT_URL").MustString(defaultLocalURL)
 	OfflineMode = sec.Key("OFFLINE_MODE").MustBool()
 	DisableRouterLog = sec.Key("DISABLE_ROUTER_LOG").MustBool()
 	StaticRootPath = sec.Key("STATIC_ROOT_PATH").MustString(workDir)
@@ -708,6 +733,7 @@ func NewContext() {
 		}
 	}
 	SSH.AuthorizedKeysBackup = sec.Key("SSH_AUTHORIZED_KEYS_BACKUP").MustBool(true)
+	SSH.ExposeAnonymous = sec.Key("SSH_EXPOSE_ANONYMOUS").MustBool(false)
 
 	if err = Cfg.Section("server").MapTo(&LFS); err != nil {
 		log.Fatal(4, "Failed to map LFS settings: %v", err)
@@ -761,7 +787,7 @@ func NewContext() {
 			log.Fatal(4, "Error retrieving git version: %v", err)
 		}
 
-		splitVersion := strings.SplitN(binVersion, ".", 3)
+		splitVersion := strings.SplitN(binVersion, ".", 4)
 
 		majorVersion, err := strconv.ParseUint(splitVersion[0], 10, 64)
 		if err != nil {

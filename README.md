@@ -1,7 +1,6 @@
 # Gitea - Git with a cup of tea - DCS Version
 
 [![Build Status](https://travis-ci.org/unfoldingWord-dev/gogs.svg?branch=master)](https://travis-ci.org/unfoldingWord-dev/gogs)
-[![Join the chat at https://gitter.im/go-gitea/gitea](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/go-gitea/gitea?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 [![](https://images.microbadger.com/badges/image/gitea/gitea.svg)](https://microbadger.com/images/gitea/gitea "Get your own image badge on microbadger.com")
 [![Coverage Status](https://coveralls.io/repos/github/unfoldingWord-dev/gogs/badge.svg?branch=develop)](https://coveralls.io/github/unfoldingWord-dev/gogs?branch=develop)
 [![Go Report Card](https://goreportcard.com/badge/github.com/unfoldingWord-dev)](https://goreportcard.com/report/github.com/unfoldingWord-dev/gogs)
@@ -26,7 +25,7 @@ The goal of this project is to make the easiest, fastest, and most painless way 
 
 ## Docs
 
-For more information and instructions about how to install Gitea please look at our [documentation](https://docs.gitea.io/en-us/). If you cannot find some specific information, then head over to our [Discord](https://discord.gg/NsatcWJ) server to chat with us or use the [forum](https://discourse.gitea.io/).
+For more information and instructions about how to install Gitea please look at our [documentation](https://docs.gitea.io/en-us/). If you cannot find some specific information, then head over to our [Discord server](https://discord.gg/NsatcWJ) or [Matrix room](https://matrix.to/#/#gitea:matrix.org) to chat with us or use the [forum](https://discourse.gitea.io/).
 
 ## Contributing
 

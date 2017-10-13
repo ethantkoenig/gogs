@@ -509,10 +509,7 @@ func SMTPAuth(a smtp.Auth, cfg *SMTPConfig) error {
 	}
 
 	if ok, _ := c.Extension("AUTH"); ok {
-		if err = c.Auth(a); err != nil {
-			return err
-		}
-		return nil
+		return c.Auth(a)
 	}
 	return ErrUnsupportedLoginType
 }
@@ -677,7 +674,7 @@ func UserSignIn(username, password string) (*User, error) {
 	}
 
 	sources := make([]*LoginSource, 0, 5)
-	if err = x.UseBool().Find(&sources, &LoginSource{IsActived: true}); err != nil {
+	if err = x.Where("is_actived = ?", true).Find(&sources); err != nil {
 		return nil, err
 	}
 

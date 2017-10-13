@@ -496,15 +496,20 @@ func UpdatePublicKey(key *PublicKey) error {
 // UpdatePublicKeyUpdated updates public key use time.
 func UpdatePublicKeyUpdated(id int64) error {
 	now := time.Now()
-	cnt, err := x.ID(id).Cols("updated_unix").Update(&PublicKey{
+	// Check if key exists before update as affected rows count is unreliable
+	//    and will return 0 affected rows if two updates are made at the same time
+	if cnt, err := x.ID(id).Count(&PublicKey{}); err != nil {
+		return err
+	} else if cnt != 1 {
+		return ErrKeyNotExist{id}
+	}
+
+	_, err := x.ID(id).Cols("updated_unix").Update(&PublicKey{
 		Updated:     now,
 		UpdatedUnix: now.Unix(),
 	})
 	if err != nil {
 		return err
-	}
-	if cnt != 1 {
-		return ErrKeyNotExist{id}
 	}
 	return nil
 }
@@ -604,11 +609,7 @@ func RewriteAllPublicKeys() error {
 		defer f.Close()
 	}
 
-	if err = os.Rename(tmpPath, fPath); err != nil {
-		return err
-	}
-
-	return nil
+	return os.Rename(tmpPath, fPath)
 }
 
 // ________                .__                 ____  __.

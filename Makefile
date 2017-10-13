@@ -1,6 +1,7 @@
 DIST := dist
 IMPORT := code.gitea.io/gitea
 
+GO ?= go
 SED_INPLACE := sed -i
 
 ifeq ($(OS), Windows_NT)
@@ -15,9 +16,8 @@ endif
 
 BINDATA := modules/{options,public,templates}/bindata.go
 STYLESHEETS := $(wildcard public/less/index.less public/less/_*.less)
-JAVASCRIPTS :=
 DOCKER_TAG := gitea/gitea:latest
-GOFILES := $(shell find . -name "*.go" -type f -not -path "./vendor/*" -not -path "*/bindata.go")
+GOFILES := $(shell find . -name "*.go" -type f ! -path "./vendor/*" ! -path "*/bindata.go")
 GOFMT ?= gofmt -s
 
 GOFLAGS := -i -v
@@ -25,7 +25,7 @@ EXTRA_GOFLAGS ?=
 
 LDFLAGS := -X "main.Version=$(shell git describe --tags --always | sed 's/-/+/' | sed 's/^v//')" -X "main.Tags=$(TAGS)"
 
-PACKAGES ?= $(filter-out code.gitea.io/gitea/integrations,$(shell go list ./... | grep -v /vendor/))
+PACKAGES ?= $(filter-out code.gitea.io/gitea/integrations,$(shell $(GO) list ./... | grep -v /vendor/))
 SOURCES ?= $(shell find . -name "*.go" -type f)
 
 TAGS ?=
@@ -53,66 +53,63 @@ all: build
 
 .PHONY: clean
 clean:
-	go clean -i ./...
-	rm -rf $(EXECUTABLE) $(DIST) $(BINDATA)
-
-required-gofmt-version:
-	@go version  | grep -q '\(1.7\|1.8\)' || { echo "We require go version 1.7 or 1.8 to format code" >&2 && exit 1; }
+	$(GO) clean -i ./...
+	rm -rf $(EXECUTABLE) $(DIST) $(BINDATA) integrations*.test
 
 .PHONY: fmt
-fmt: required-gofmt-version
+fmt:
 	$(GOFMT) -w $(GOFILES)
 
 .PHONY: vet
 vet:
-	go vet $(PACKAGES)
+	$(GO) vet $(PACKAGES)
 
 .PHONY: generate
 generate:
 	@hash go-bindata > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/jteeuwen/go-bindata/...; \
+		$(GO) get -u github.com/jteeuwen/go-bindata/...; \
 	fi
-	go generate $(PACKAGES)
+	$(GO) generate $(PACKAGES)
 
 .PHONY: generate-swagger
 generate-swagger:
 	@hash swagger > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/go-swagger/go-swagger/cmd/swagger; \
+		$(GO) get -u github.com/go-swagger/go-swagger/cmd/swagger; \
 	fi
 	swagger generate spec -o ./public/swagger.v1.json
 	$(SED_INPLACE) "s;\".ref\": \"#/definitions/GPGKey\";\"type\": \"object\";g" ./public/swagger.v1.json
 	$(SED_INPLACE) "s;^          \".ref\": \"#/definitions/Repository\";          \"type\": \"object\";g" ./public/swagger.v1.json
-	
+
 .PHONY: errcheck
 errcheck:
 	@hash errcheck > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/kisielk/errcheck; \
+		$(GO) get -u github.com/kisielk/errcheck; \
 	fi
 	errcheck $(PACKAGES)
 
 .PHONY: lint
 lint:
 	@hash golint > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/golang/lint/golint; \
+		$(GO) get -u github.com/golang/lint/golint; \
 	fi
 	for PKG in $(PACKAGES); do golint -set_exit_status $$PKG || exit 1; done;
 
 .PHONY: misspell-check
 misspell-check:
 	@hash misspell > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/client9/misspell/cmd/misspell; \
+		$(GO) get -u github.com/client9/misspell/cmd/misspell; \
 	fi
 	misspell -error -i unknwon $(GOFILES)
 
 .PHONY: misspell
 misspell:
 	@hash misspell > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/client9/misspell/cmd/misspell; \
+		$(GO) get -u github.com/client9/misspell/cmd/misspell; \
 	fi
 	misspell -w -i unknwon $(GOFILES)
 
 .PHONY: fmt-check
-fmt-check: required-gofmt-version
+fmt-check:
 	# get all go files and run go fmt on them
 	@diff=$$($(GOFMT) -d $(GOFILES)); \
 	if [ -n "$$diff" ]; then \
@@ -123,10 +120,13 @@ fmt-check: required-gofmt-version
 
 .PHONY: test
 test: fmt-check
-	go test $(PACKAGES)
+	$(GO) test $(PACKAGES)
 
 .PHONY: test-coverage
 test-coverage: unit-test-coverage integration-test-coverage
+	@hash gocovmerge > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
+		$(GO) get -u github.com/wadey/gocovmerge; \
+	fi
 	for PKG in $(PACKAGES); do\
 	  touch $$GOPATH/src/$$PKG/coverage.out;\
 	  egrep "$$PKG[^/]*\.go" integration.coverage.out > int.coverage.out;\
@@ -137,12 +137,12 @@ test-coverage: unit-test-coverage integration-test-coverage
 
 .PHONY: unit-test-coverage
 unit-test-coverage:
-	for PKG in $(PACKAGES); do go test -cover -coverprofile $$GOPATH/src/$$PKG/coverage.out $$PKG || exit 1; done;
+	for PKG in $(PACKAGES); do $(GO) test -cover -coverprofile $$GOPATH/src/$$PKG/coverage.out $$PKG || exit 1; done;
 
 .PHONY: test-vendor
 test-vendor:
 	@hash govendor > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/kardianos/govendor; \
+		$(GO) get -u github.com/kardianos/govendor; \
 	fi
 	govendor list +unused | tee "$(TMPDIR)/wc-gitea-unused"
 	[ $$(cat "$(TMPDIR)/wc-gitea-unused" | wc -l) -eq 0 ] || echo "Warning: /!\\ Some vendor are not used /!\\"
@@ -183,26 +183,26 @@ integration-test-coverage: integrations.cover.test
 	GITEA_ROOT=${CURDIR} GITEA_CONF=integrations/mysql.ini ./integrations.cover.test -test.coverprofile=integration.coverage.out
 
 integrations.test: $(SOURCES)
-	go test -c code.gitea.io/gitea/integrations
+	$(GO) test -c code.gitea.io/gitea/integrations
 
 integrations.sqlite.test: $(SOURCES)
-	go test -c code.gitea.io/gitea/integrations -o integrations.sqlite.test -tags 'sqlite'
+	$(GO) test -c code.gitea.io/gitea/integrations -o integrations.sqlite.test -tags 'sqlite'
 
 integrations.cover.test: $(SOURCES)
-	go test -c code.gitea.io/gitea/integrations -coverpkg $(shell echo $(PACKAGES) | tr ' ' ',') -o integrations.cover.test
+	$(GO) test -c code.gitea.io/gitea/integrations -coverpkg $(shell echo $(PACKAGES) | tr ' ' ',') -o integrations.cover.test
 
 .PHONY: check
 check: test
 
 .PHONY: install
 install: $(wildcard *.go)
-	go install -v -tags '$(TAGS)' -ldflags '-s -w $(LDFLAGS)'
+	$(GO) install -v -tags '$(TAGS)' -ldflags '-s -w $(LDFLAGS)'
 
 .PHONY: build
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES)
-	go build $(GOFLAGS) $(EXTRA_GOFLAGS) -tags '$(TAGS)' -ldflags '-s -w $(LDFLAGS)' -o $@
+	$(GO) build $(GOFLAGS) $(EXTRA_GOFLAGS) -tags '$(TAGS)' -ldflags '-s -w $(LDFLAGS)' -o $@
 
 .PHONY: docker
 docker:
@@ -219,7 +219,7 @@ release-dirs:
 .PHONY: release-windows
 release-windows:
 	@hash xgo > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/karalabe/xgo; \
+		$(GO) get -u github.com/karalabe/xgo; \
 	fi
 	xgo -dest $(DIST)/binaries -tags 'netgo $(TAGS)' -ldflags '-linkmode external -extldflags "-static" $(LDFLAGS)' -targets 'windows/*' -out gitea-$(VERSION) .
 ifeq ($(CI),drone)
@@ -229,7 +229,7 @@ endif
 .PHONY: release-linux
 release-linux:
 	@hash xgo > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/karalabe/xgo; \
+		$(GO) get -u github.com/karalabe/xgo; \
 	fi
 	xgo -dest $(DIST)/binaries -tags 'netgo $(TAGS)' -ldflags '-linkmode external -extldflags "-static" $(LDFLAGS)' -targets 'linux/*' -out gitea-$(VERSION) .
 ifeq ($(CI),drone)
@@ -239,7 +239,7 @@ endif
 .PHONY: release-darwin
 release-darwin:
 	@hash xgo > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
-		go get -u github.com/karalabe/xgo; \
+		$(GO) get -u github.com/karalabe/xgo; \
 	fi
 	xgo -dest $(DIST)/binaries -tags 'netgo $(TAGS)' -ldflags '$(LDFLAGS)' -targets 'darwin/*' -out gitea-$(VERSION) .
 ifeq ($(CI),drone)
@@ -261,20 +261,64 @@ javascripts: public/js/index.js
 public/js/index.js: $(JAVASCRIPTS)
 	cat $< >| $@
 
+.PHONY: stylesheets-check
+stylesheets-check: stylesheets
+	@diff=$$(git diff public/css/index.css); \
+	if [ -n "$$diff" ]; then \
+		echo "Please run 'make stylesheets' and commit the result:"; \
+		echo "$${diff}"; \
+		exit 1; \
+	fi;
+
 .PHONY: stylesheets
 stylesheets: public/css/index.css
 
 .IGNORE: public/css/index.css
 public/css/index.css: $(STYLESHEETS)
-	lessc $< $@
+	@which lessc > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) get -u github.com/kib357/less-go/lessc; \
+	fi
+	lessc -i $< -o $@
 
 .PHONY: swagger-ui
 swagger-ui:
-	rm -Rf public/assets/swagger-ui
-	git clone --depth=10 -b v3.0.7 --single-branch https://github.com/swagger-api/swagger-ui.git /tmp/swagger-ui
-	mv /tmp/swagger-ui/dist public/assets/swagger-ui
-	rm -Rf /tmp/swagger-ui
+	rm -Rf public/vendor/assets/swagger-ui
+	git clone --depth=10 -b v3.0.7 --single-branch https://github.com/swagger-api/swagger-ui.git $(TMPDIR)/swagger-ui
+	mv $(TMPDIR)/swagger-ui/dist public/vendor/assets/swagger-ui
+	rm -Rf $(TMPDIR)/swagger-ui
 	$(SED_INPLACE) "s;http://petstore.swagger.io/v2/swagger.json;../../swagger.v1.json;g" public/assets/swagger-ui/index.html
 
-.PHONY: assets
-assets: javascripts stylesheets
+.PHONY: update-translations
+update-translations:
+	mkdir -p ./translations
+	cd ./translations && curl -L https://crowdin.com/download/project/gitea.zip > gitea.zip && unzip gitea.zip
+	rm ./translations/gitea.zip
+	$(SED_INPLACE) -e 's/="/=/g' -e 's/"$$//g' ./translations/*.ini
+	$(SED_INPLACE) -e 's/\\"/"/g' ./translations/*.ini
+	mv ./translations/*.ini ./options/locale/
+	rmdir ./translations
+
+.PHONY: generate-images
+generate-images:
+	mkdir -p $(TMPDIR)/images
+	inkscape -f $(PWD)/assets/logo.svg -w 880 -h 880 -e $(PWD)/public/img/gitea-lg.png
+	inkscape -f $(PWD)/assets/logo.svg -w 120 -h 120 -jC -i layer1 -e $(TMPDIR)/images/sm-1.png
+	inkscape -f $(PWD)/assets/logo.svg -w 120 -h 120 -jC -i layer2 -e $(TMPDIR)/images/sm-2.png
+	composite -compose atop $(TMPDIR)/images/sm-2.png $(TMPDIR)/images/sm-1.png $(PWD)/public/img/gitea-sm.png
+	inkscape -f $(PWD)/assets/logo.svg -w 200 -h 200 -e $(PWD)/public/img/avatar_default.png
+	inkscape -f $(PWD)/assets/logo.svg -w 180 -h 180 -e $(PWD)/public/img/favicon.png
+	inkscape -f $(PWD)/assets/logo.svg -w 128 -h 128 -e $(TMPDIR)/images/128-raw.png
+	inkscape -f $(PWD)/assets/logo.svg -w 64 -h 64 -e $(TMPDIR)/images/64-raw.png
+	inkscape -f $(PWD)/assets/logo.svg -w 32 -h 32 -jC -i layer1 -e $(TMPDIR)/images/32-1.png
+	inkscape -f $(PWD)/assets/logo.svg -w 32 -h 32 -jC -i layer2 -e $(TMPDIR)/images/32-2.png
+	composite -compose atop $(TMPDIR)/images/32-2.png $(TMPDIR)/images/32-1.png $(TMPDIR)/images/32-raw.png
+	inkscape -f $(PWD)/assets/logo.svg -w 16 -h 16 -jC -i layer1 -e $(TMPDIR)/images/16-raw.png
+	zopflipng $(TMPDIR)/images/128-raw.png $(TMPDIR)/images/128.png
+	zopflipng $(TMPDIR)/images/64-raw.png $(TMPDIR)/images/64.png
+	zopflipng $(TMPDIR)/images/32-raw.png $(TMPDIR)/images/32.png
+	zopflipng $(TMPDIR)/images/16-raw.png $(TMPDIR)/images/16.png
+	rm -f $(TMPDIR)/images/*-*.png
+	convert $(TMPDIR)/images/16.png $(TMPDIR)/images/32.png \
+					$(TMPDIR)/images/64.png $(TMPDIR)/images/128.png \
+					$(PWD)/public/img/favicon.ico
+	rm -rf $(TMPDIR)/images

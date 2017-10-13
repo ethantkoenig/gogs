@@ -22,35 +22,15 @@ import (
 	"code.gitea.io/gitea/modules/context"
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/setting"
-
-	"github.com/Unknwon/com"
 )
-
-func composeGoGetImport(owner, repo, sub string) string {
-	return path.Join(setting.Domain, setting.AppSubURL, owner, repo, sub)
-}
-
-// earlyResponseForGoGetMeta responses appropriate go-get meta with status 200
-// if user does not have actual access to the requested repository,
-// or the owner or repository does not exist at all.
-// This is particular a workaround for "go get" command which does not respect
-// .netrc file.
-func earlyResponseForGoGetMeta(ctx *context.Context, username, reponame, subpath string) {
-	ctx.PlainText(200, []byte(com.Expand(`<meta name="go-import" content="{GoGetImport} git {CloneLink}">`,
-		map[string]string{
-			"GoGetImport": composeGoGetImport(username, reponame, subpath),
-			"CloneLink":   models.ComposeHTTPSCloneURL(username, reponame),
-		})))
-}
 
 // HTTP implmentation git smart HTTP protocol
 func HTTP(ctx *context.Context) {
 	username := ctx.Params(":username")
 	reponame := strings.TrimSuffix(ctx.Params(":reponame"), ".git")
-	subpath := ctx.Params("*")
 
 	if ctx.Query("go-get") == "1" {
-		earlyResponseForGoGetMeta(ctx, username, reponame, subpath)
+		context.EarlyResponseForGoGetMeta(ctx)
 		return
 	}
 
@@ -156,24 +136,50 @@ func HTTP(ctx *context.Context) {
 					ctx.Handle(http.StatusInternalServerError, "UserSignIn error: %v", err)
 					return
 				}
+			}
 
-				// Assume username now is a token.
-				token, err := models.GetAccessTokenBySHA(authUsername)
+			if authUser == nil {
+				authUser, err = models.GetUserByName(authUsername)
+
+				if err != nil {
+					if models.IsErrUserNotExist(err) {
+						ctx.HandleText(http.StatusUnauthorized, "invalid credentials")
+					} else {
+						ctx.Handle(http.StatusInternalServerError, "GetUserByName", err)
+					}
+					return
+				}
+
+				// Assume password is a token.
+				token, err := models.GetAccessTokenBySHA(authPasswd)
 				if err != nil {
 					if models.IsErrAccessTokenNotExist(err) || models.IsErrAccessTokenEmpty(err) {
-						ctx.HandleText(http.StatusUnauthorized, "invalid token")
+						ctx.HandleText(http.StatusUnauthorized, "invalid credentials")
 					} else {
 						ctx.Handle(http.StatusInternalServerError, "GetAccessTokenBySha", err)
 					}
 					return
 				}
+
+				if authUser.ID != token.UID {
+					ctx.HandleText(http.StatusUnauthorized, "invalid credentials")
+					return
+				}
+
 				token.Updated = time.Now()
 				if err = models.UpdateAccessToken(token); err != nil {
 					ctx.Handle(http.StatusInternalServerError, "UpdateAccessToken", err)
 				}
-				authUser, err = models.GetUserByID(token.UID)
-				if err != nil {
-					ctx.Handle(http.StatusInternalServerError, "GetUserByID", err)
+
+			} else {
+				_, err = models.GetTwoFactorByUID(authUser.ID)
+
+				if err == nil {
+					// TODO: This response should be changed to "invalid credentials" for security reasons once the expectation behind it (creating an app token to authenticate) is properly documented
+					ctx.HandleText(http.StatusUnauthorized, "Users with two-factor authentication enabled cannot perform HTTP/HTTPS operations via plain username and password. Please create and use a personal access token on the user settings page")
+					return
+				} else if !models.IsErrTwoFactorNotEnrolled(err) {
+					ctx.Handle(http.StatusInternalServerError, "IsErrTwoFactorNotEnrolled", err)
 					return
 				}
 			}

@@ -136,6 +136,20 @@ func RegisterRoutes(m *macaron.Macaron) {
 	bindIgnErr := binding.BindIgnErr
 	validation.AddBindingRules()
 
+	openIDSignInEnabled := func(ctx *context.Context) {
+		if !setting.Service.EnableOpenIDSignIn {
+			ctx.Error(403)
+			return
+		}
+	}
+
+	openIDSignUpEnabled := func(ctx *context.Context) {
+		if !setting.Service.EnableOpenIDSignUp {
+			ctx.Error(403)
+			return
+		}
+	}
+
 	m.Use(user.GetNotificationCount)
 
 	// FIXME: not all routes need go through same middlewares.
@@ -163,19 +177,21 @@ func RegisterRoutes(m *macaron.Macaron) {
 	m.Group("/user", func() {
 		m.Get("/login", user.SignIn)
 		m.Post("/login", bindIgnErr(auth.SignInForm{}), user.SignInPost)
-		if setting.Service.EnableOpenIDSignIn {
+		m.Group("", func() {
 			m.Combo("/login/openid").
 				Get(user.SignInOpenID).
 				Post(bindIgnErr(auth.SignInOpenIDForm{}), user.SignInOpenIDPost)
-			m.Group("/openid", func() {
-				m.Combo("/connect").
-					Get(user.ConnectOpenID).
-					Post(bindIgnErr(auth.ConnectOpenIDForm{}), user.ConnectOpenIDPost)
-				m.Combo("/routes").
-					Get(user.RegisterOpenID).
+		}, openIDSignInEnabled)
+		m.Group("/openid", func() {
+			m.Combo("/connect").
+				Get(user.ConnectOpenID).
+				Post(bindIgnErr(auth.ConnectOpenIDForm{}), user.ConnectOpenIDPost)
+			m.Group("/register", func() {
+				m.Combo("").
+					Get(user.RegisterOpenID, openIDSignUpEnabled).
 					Post(bindIgnErr(auth.SignUpOpenIDForm{}), user.RegisterOpenIDPost)
-			})
-		}
+			}, openIDSignUpEnabled)
+		}, openIDSignInEnabled)
 		m.Get("/sign_up", user.SignUp)
 		m.Post("/sign_up", bindIgnErr(auth.RegisterForm{}), user.SignUpPost)
 		m.Get("/reset_password", user.ResetPasswd)
@@ -206,15 +222,12 @@ func RegisterRoutes(m *macaron.Macaron) {
 		m.Post("/email/delete", user.DeleteEmail)
 		m.Get("/password", user.SettingsPassword)
 		m.Post("/password", bindIgnErr(auth.ChangePasswordForm{}), user.SettingsPasswordPost)
-		if setting.Service.EnableOpenIDSignIn {
-			m.Group("/openid", func() {
-				m.Combo("").Get(user.SettingsOpenID).
-					Post(bindIgnErr(auth.AddOpenIDForm{}), user.SettingsOpenIDPost)
-				m.Post("/delete", user.DeleteOpenID)
-				m.Post("/toggle_visibility", user.ToggleOpenIDVisibility)
-			})
-		}
-
+		m.Group("/openid", func() {
+			m.Combo("").Get(user.SettingsOpenID).
+				Post(bindIgnErr(auth.AddOpenIDForm{}), user.SettingsOpenIDPost)
+			m.Post("/delete", user.DeleteOpenID)
+			m.Post("/toggle_visibility", user.ToggleOpenIDVisibility)
+		}, openIDSignInEnabled)
 		m.Combo("/keys").Get(user.SettingsKeys).
 			Post(bindIgnErr(auth.AddKeyForm{}), user.SettingsKeysPost)
 		m.Post("/keys/delete", user.DeleteKey)
@@ -403,8 +416,10 @@ func RegisterRoutes(m *macaron.Macaron) {
 		m.Post("/create", bindIgnErr(auth.CreateRepoForm{}), repo.CreatePost)
 		m.Get("/migrate", repo.Migrate)
 		m.Post("/migrate", bindIgnErr(auth.MigrateRepoForm{}), repo.MigratePost)
-		m.Combo("/fork/:repoid").Get(repo.Fork).
-			Post(bindIgnErr(auth.CreateRepoForm{}), repo.ForkPost)
+		m.Group("/fork", func() {
+			m.Combo("/:repoid").Get(repo.Fork).
+				Post(bindIgnErr(auth.CreateRepoForm{}), repo.ForkPost)
+		}, context.RepoIDAssignment(), context.UnitTypes(), context.LoadRepoUnits(), context.CheckUnit(models.UnitTypeCode))
 	}, reqSignIn)
 
 	m.Group("/:username/:reponame", func() {
@@ -450,8 +465,8 @@ func RegisterRoutes(m *macaron.Macaron) {
 
 		}, func(ctx *context.Context) {
 			ctx.Data["PageIsSettings"] = true
-		}, context.UnitTypes(), context.LoadRepoUnits(), context.CheckUnit(models.UnitTypeSettings))
-	}, reqSignIn, context.RepoAssignment(), reqRepoAdmin, context.RepoRef())
+		})
+	}, reqSignIn, context.RepoAssignment(), reqRepoAdmin, context.UnitTypes(), context.LoadRepoUnits(), context.RepoRef())
 
 	m.Get("/:username/:reponame/action/:action", reqSignIn, context.RepoAssignment(), repo.Action)
 
@@ -590,11 +605,14 @@ func RegisterRoutes(m *macaron.Macaron) {
 		}, repo.MustAllowPulls, context.CheckUnit(models.UnitTypePullRequests))
 
 		m.Group("", func() {
-			m.Get("/src/*", repo.SetEditorconfigIfExists, repo.Home)
 			m.Get("/raw/*", repo.SingleDownload)
 			m.Get("/commits/*", repo.RefCommits)
 			m.Get("/graph", repo.Graph)
 			m.Get("/commit/:sha([a-f0-9]{7,40})$", repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.Diff)
+		}, repo.MustBeNotBare, context.RepoRef(), context.CheckUnit(models.UnitTypeCode))
+
+		m.Group("", func() {
+			m.Get("/src/*", repo.SetEditorconfigIfExists, repo.Home)
 			m.Get("/forks", repo.Forks)
 		}, context.RepoRef(), context.CheckUnit(models.UnitTypeCode))
 		m.Get("/commit/:sha([a-f0-9]{7,40})\\.:ext(patch|diff)", repo.MustBeNotBare, repo.RawDiff, context.CheckUnit(models.UnitTypeCode))
@@ -648,7 +666,7 @@ func RegisterRoutes(m *macaron.Macaron) {
 		if setting.HasRobotsTxt {
 			ctx.ServeFileContent(path.Join(setting.CustomPath, "robots.txt"))
 		} else {
-			ctx.Error(404)
+			ctx.Handle(404, "", nil)
 		}
 	})
 

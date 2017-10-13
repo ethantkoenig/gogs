@@ -16,8 +16,6 @@ import (
 )
 
 var (
-	// ErrOrgNotExist organization does not exist
-	ErrOrgNotExist = errors.New("Organization does not exist")
 	// ErrTeamNotExist team does not exist
 	ErrTeamNotExist = errors.New("Team does not exist")
 )
@@ -180,7 +178,7 @@ func CreateOrganization(org, owner *User) (err error) {
 // GetOrgByName returns organization by given name.
 func GetOrgByName(name string) (*User, error) {
 	if len(name) == 0 {
-		return nil, ErrOrgNotExist
+		return nil, ErrOrgNotExist{0, name}
 	}
 	u := &User{
 		LowerName: strings.ToLower(name),
@@ -190,7 +188,7 @@ func GetOrgByName(name string) (*User, error) {
 	if err != nil {
 		return nil, err
 	} else if !has {
-		return nil, ErrOrgNotExist
+		return nil, ErrOrgNotExist{0, name}
 	}
 	return u, nil
 }
@@ -237,11 +235,7 @@ func DeleteOrganization(org *User) (err error) {
 		}
 	}
 
-	if err = sess.Commit(); err != nil {
-		return err
-	}
-
-	return nil
+	return sess.Commit()
 }
 
 func deleteOrg(e *xorm.Session, u *User) error {
@@ -677,7 +671,7 @@ func (env *accessibleReposEnv) MirrorRepoIDs() ([]int64, error) {
 		Table("repository").
 		Join("INNER", "team_repo", "`team_repo`.repo_id=`repository`.id AND `repository`.is_mirror=?", true).
 		Where(env.cond()).
-		GroupBy("`repository`.id").
+		GroupBy("`repository`.id, `repository`.updated_unix").
 		OrderBy("updated_unix DESC").
 		Cols("`repository`.id").
 		Find(&repoIDs)

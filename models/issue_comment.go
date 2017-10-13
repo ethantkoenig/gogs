@@ -399,7 +399,11 @@ func createComment(e *xorm.Session, opts *CreateCommentOptions) (_ *Comment, err
 		if err != nil {
 			return nil, err
 		}
+	}
 
+	// update the issue's updated_unix column
+	if err = updateIssueCols(e, opts.Issue); err != nil {
+		return nil, err
 	}
 
 	// Notify watchers for whatever action comes in, ignore if no action type.
@@ -668,7 +672,10 @@ func DeleteComment(comment *Comment) error {
 			return err
 		}
 	}
-	sess.Where("comment_id = ?", comment.ID).Cols("is_deleted").Update(&Action{IsDeleted: true})
+
+	if _, err := sess.Where("comment_id = ?", comment.ID).Cols("is_deleted").Update(&Action{IsDeleted: true}); err != nil {
+		return err
+	}
 
 	return sess.Commit()
 }

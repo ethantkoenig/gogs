@@ -276,11 +276,7 @@ func DeleteGPGKey(doer *User, id int64) (err error) {
 		return err
 	}
 
-	if err = sess.Commit(); err != nil {
-		return err
-	}
-
-	return nil
+	return sess.Commit()
 }
 
 // CommitVerification represents a commit validation of signature
@@ -368,9 +364,7 @@ func verifySign(s *packet.Signature, h hash.Hash, k *GPGKey) error {
 
 // ParseCommitWithSignature check if signature is good against keystore.
 func ParseCommitWithSignature(c *git.Commit) *CommitVerification {
-
 	if c.Signature != nil {
-
 		//Parsing signature
 		sig, err := extractSignature(c.Signature.Signature)
 		if err != nil { //Skipping failed to extract sign
@@ -392,7 +386,7 @@ func ParseCommitWithSignature(c *git.Commit) *CommitVerification {
 		}
 
 		keys, err := ListGPGKeys(committer.ID)
-		if err != nil || len(keys) == 0 { //Skipping failed to get gpg keys of user
+		if err != nil { //Skipping failed to get gpg keys of user
 			log.Error(3, "ListGPGKeys: %v", err)
 			return &CommitVerification{
 				Verified: false,

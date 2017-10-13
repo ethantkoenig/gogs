@@ -35,7 +35,6 @@ import (
 	"code.gitea.io/gitea/modules/avatar"
 	"code.gitea.io/gitea/modules/base"
 	"code.gitea.io/gitea/modules/log"
-	"code.gitea.io/gitea/modules/markdown"
 	"code.gitea.io/gitea/modules/setting"
 )
 
@@ -158,14 +157,12 @@ func (u *User) SetLastLogin() {
 // UpdateDiffViewStyle updates the users diff view style
 func (u *User) UpdateDiffViewStyle(style string) error {
 	u.DiffViewStyle = style
-	return UpdateUser(u)
+	return UpdateUserCols(u, "diff_view_style")
 }
 
 // AfterSet is invoked from XORM after setting the value of a field of this object.
 func (u *User) AfterSet(colName string, _ xorm.Cell) {
 	switch colName {
-	case "full_name":
-		u.FullName = markdown.Sanitize(u.FullName)
 	case "created_unix":
 		u.Created = time.Unix(u.CreatedUnix, 0).Local()
 	case "updated_unix":
@@ -333,15 +330,14 @@ func (u *User) generateRandomAvatar(e Engine) error {
 // which includes app sub-url as prefix. However, it is possible
 // to return full URL if user enables Gravatar-like service.
 func (u *User) RelAvatarLink() string {
-	defaultImgURL := setting.AppSubURL + "/img/avatar_default.png"
 	if u.ID == -1 {
-		return defaultImgURL
+		return base.DefaultAvatarLink()
 	}
 
 	switch {
 	case u.UseCustomAvatar:
 		if !com.IsFile(u.CustomAvatarPath()) {
-			return defaultImgURL
+			return base.DefaultAvatarLink()
 		}
 		return setting.AppSubURL + "/avatars/" + u.Avatar
 	case setting.DisableGravatar, setting.OfflineMode:
@@ -864,7 +860,9 @@ func updateUser(e Engine, u *User) error {
 		if len(u.AvatarEmail) == 0 {
 			u.AvatarEmail = u.Email
 		}
-		u.Avatar = base.HashEmail(u.AvatarEmail)
+		if len(u.AvatarEmail) > 0 {
+			u.Avatar = base.HashEmail(u.AvatarEmail)
+		}
 	}
 
 	u.LowerName = strings.ToLower(u.Name)
@@ -872,7 +870,6 @@ func updateUser(e Engine, u *User) error {
 	u.Website = base.TruncateString(u.Website, 255)
 	u.Description = base.TruncateString(u.Description, 255)
 
-	u.FullName = markdown.Sanitize(u.FullName)
 	_, err := e.Id(u.ID).AllCols().Update(u)
 	return err
 }
@@ -880,6 +877,29 @@ func updateUser(e Engine, u *User) error {
 // UpdateUser updates user's information.
 func UpdateUser(u *User) error {
 	return updateUser(x, u)
+}
+
+// UpdateUserCols update user according special columns
+func UpdateUserCols(u *User, cols ...string) error {
+	// Organization does not need email
+	u.Email = strings.ToLower(u.Email)
+	if !u.IsOrganization() {
+		if len(u.AvatarEmail) == 0 {
+			u.AvatarEmail = u.Email
+		}
+		if len(u.AvatarEmail) > 0 {
+			u.Avatar = base.HashEmail(u.AvatarEmail)
+		}
+	}
+
+	u.LowerName = strings.ToLower(u.Name)
+	u.Location = base.TruncateString(u.Location, 255)
+	u.Website = base.TruncateString(u.Website, 255)
+	u.Description = base.TruncateString(u.Description, 255)
+
+	cols = append(cols, "updated_unix")
+	_, err := x.Id(u.ID).Cols(cols...).Update(u)
+	return err
 }
 
 // UpdateUserSetting updates user's settings.
@@ -1427,7 +1447,7 @@ func SyncExternalUsers() {
 						}
 						usr.IsActive = true
 
-						err = UpdateUser(usr)
+						err = UpdateUserCols(usr, "full_name", "email", "is_admin", "is_active")
 						if err != nil {
 							log.Error(4, "SyncExternalUsers[%s]: Error updating user %s: %v", s.Name, usr.Name, err)
 						}
@@ -1449,7 +1469,7 @@ func SyncExternalUsers() {
 						log.Trace("SyncExternalUsers[%s]: Deactivating user %s", s.Name, usr.Name)
 
 						usr.IsActive = false
-						err = UpdateUser(&usr)
+						err = UpdateUserCols(&usr, "is_active")
 						if err != nil {
 							log.Error(4, "SyncExternalUsers[%s]: Error deactivating user %s: %v", s.Name, usr.Name, err)
 						}

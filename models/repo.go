@@ -194,7 +194,7 @@ type Repository struct {
 	NumMilestones       int `xorm:"NOT NULL DEFAULT 0"`
 	NumClosedMilestones int `xorm:"NOT NULL DEFAULT 0"`
 	NumOpenMilestones   int `xorm:"-"`
-	NumTags             int `xorm:"-"`
+	NumReleases         int `xorm:"-"`
 
 	IsPrivate bool `xorm:"INDEX"`
 	IsBare    bool `xorm:"INDEX"`
@@ -378,6 +378,10 @@ func (repo *Repository) getUnitsByUserID(e Engine, userID int64, isAdmin bool) (
 
 	var allTypes = make(map[UnitType]struct{}, len(allRepUnitTypes))
 	for _, team := range teams {
+		// Administrators can not be limited
+		if team.Authorize >= AccessModeAdmin {
+			return nil
+		}
 		for _, unitType := range team.UnitTypes {
 			allTypes[unitType] = struct{}{}
 		}
@@ -395,8 +399,8 @@ func (repo *Repository) getUnitsByUserID(e Engine, userID int64, isAdmin bool) (
 	return nil
 }
 
-// EnableUnit if this repository enabled some unit
-func (repo *Repository) EnableUnit(tp UnitType) bool {
+// UnitEnabled if this repository has the given unit enabled
+func (repo *Repository) UnitEnabled(tp UnitType) bool {
 	repo.getUnits(x)
 	for _, unit := range repo.Units {
 		if unit.Type == tp {
@@ -645,7 +649,7 @@ func (repo *Repository) UpdateSize() error {
 
 // CanBeForked returns true if repository meets the requirements of being forked.
 func (repo *Repository) CanBeForked() bool {
-	return !repo.IsBare
+	return !repo.IsBare && repo.UnitEnabled(UnitTypeCode)
 }
 
 // CanEnablePulls returns true if repository meets the requirements of accepting pulls.
@@ -655,7 +659,7 @@ func (repo *Repository) CanEnablePulls() bool {
 
 // AllowsPulls returns true if repository meets the requirements of accepting pulls and has them enabled.
 func (repo *Repository) AllowsPulls() bool {
-	return repo.CanEnablePulls() && repo.EnableUnit(UnitTypePullRequests)
+	return repo.CanEnablePulls() && repo.UnitEnabled(UnitTypePullRequests)
 }
 
 // CanEnableEditor returns true if repository meets the requirements of web editor.
@@ -909,6 +913,10 @@ func MigrateRepository(u *User, opts MigrateRepoOptions) (*Repository, error) {
 		if headBranch != nil {
 			repo.DefaultBranch = headBranch.Name
 		}
+
+		if err = SyncReleasesWithTags(repo, gitRepo); err != nil {
+			log.Error(4, "Failed to synchronize tags to releases for repository: %v", err)
+		}
 	}
 
 	if err = repo.UpdateSize(); err != nil {
@@ -949,8 +957,12 @@ func cleanUpMigrateGitConfig(configPath string) error {
 // createDelegateHooks creates all the hooks scripts for the repo
 func createDelegateHooks(repoPath string) (err error) {
 	var (
-		hookNames     = []string{"pre-receive", "update", "post-receive"}
-		hookTpl       = fmt.Sprintf("#!/usr/bin/env %s\ndata=$(cat)\nexitcodes=\"\"\nhookname=$(basename $0)\nGIT_DIR=${GIT_DIR:-$(dirname $0)}\n\nfor hook in ${GIT_DIR}/hooks/${hookname}.d/*; do\ntest -x \"${hook}\" || continue\necho \"${data}\" | \"${hook}\"\nexitcodes=\"${exitcodes} $?\"\ndone\n\nfor i in ${exitcodes}; do\n[ ${i} -eq 0 ] || exit ${i}\ndone\n", setting.ScriptType)
+		hookNames = []string{"pre-receive", "update", "post-receive"}
+		hookTpls  = []string{
+			fmt.Sprintf("#!/usr/bin/env %s\ndata=$(cat)\nexitcodes=\"\"\nhookname=$(basename $0)\nGIT_DIR=${GIT_DIR:-$(dirname $0)}\n\nfor hook in ${GIT_DIR}/hooks/${hookname}.d/*; do\ntest -x \"${hook}\" || continue\necho \"${data}\" | \"${hook}\"\nexitcodes=\"${exitcodes} $?\"\ndone\n\nfor i in ${exitcodes}; do\n[ ${i} -eq 0 ] || exit ${i}\ndone\n", setting.ScriptType),
+			fmt.Sprintf("#!/usr/bin/env %s\nexitcodes=\"\"\nhookname=$(basename $0)\nGIT_DIR=${GIT_DIR:-$(dirname $0)}\n\nfor hook in ${GIT_DIR}/hooks/${hookname}.d/*; do\ntest -x \"${hook}\" || continue\n\"${hook}\" $1 $2 $3\nexitcodes=\"${exitcodes} $?\"\ndone\n\nfor i in ${exitcodes}; do\n[ ${i} -eq 0 ] || exit ${i}\ndone\n", setting.ScriptType),
+			fmt.Sprintf("#!/usr/bin/env %s\ndata=$(cat)\nexitcodes=\"\"\nhookname=$(basename $0)\nGIT_DIR=${GIT_DIR:-$(dirname $0)}\n\nfor hook in ${GIT_DIR}/hooks/${hookname}.d/*; do\ntest -x \"${hook}\" || continue\necho \"${data}\" | \"${hook}\"\nexitcodes=\"${exitcodes} $?\"\ndone\n\nfor i in ${exitcodes}; do\n[ ${i} -eq 0 ] || exit ${i}\ndone\n", setting.ScriptType),
+		}
 		giteaHookTpls = []string{
 			fmt.Sprintf("#!/usr/bin/env %s\n\"%s\" hook --config='%s' pre-receive\n", setting.ScriptType, setting.AppPath, setting.CustomConf),
 			fmt.Sprintf("#!/usr/bin/env %s\n\"%s\" hook --config='%s' update $1 $2 $3\n", setting.ScriptType, setting.AppPath, setting.CustomConf),
@@ -969,7 +981,7 @@ func createDelegateHooks(repoPath string) (err error) {
 		}
 
 		// WARNING: This will override all old server-side hooks
-		if err = ioutil.WriteFile(oldHookPath, []byte(hookTpl), 0777); err != nil {
+		if err = ioutil.WriteFile(oldHookPath, []byte(hookTpls[i]), 0777); err != nil {
 			return fmt.Errorf("write old hook file '%s': %v", oldHookPath, err)
 		}
 

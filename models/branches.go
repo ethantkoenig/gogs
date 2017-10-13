@@ -17,10 +17,10 @@ const (
 
 // ProtectedBranch struct
 type ProtectedBranch struct {
-	ID          int64  `xorm:"pk autoincr"`
-	RepoID      int64  `xorm:"UNIQUE(s)"`
-	BranchName  string `xorm:"UNIQUE(s)"`
-	CanPush     bool
+	ID          int64     `xorm:"pk autoincr"`
+	RepoID      int64     `xorm:"UNIQUE(s)"`
+	BranchName  string    `xorm:"UNIQUE(s)"`
+	CanPush     bool      `xorm:"NOT NULL DEFAULT false"`
 	Created     time.Time `xorm:"-"`
 	CreatedUnix int64
 	Updated     time.Time `xorm:"-"`
@@ -36,6 +36,11 @@ func (protectBranch *ProtectedBranch) BeforeInsert() {
 // BeforeUpdate before protected branch update time
 func (protectBranch *ProtectedBranch) BeforeUpdate() {
 	protectBranch.UpdatedUnix = time.Now().Unix()
+}
+
+// IsProtected returns if the branch is protected
+func (protectBranch *ProtectedBranch) IsProtected() bool {
+	return protectBranch.ID > 0
 }
 
 // GetProtectedBranchByRepoID getting protected branch by repo ID
